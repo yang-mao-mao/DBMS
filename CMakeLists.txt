@@ -23,6 +23,13 @@ target_include_directories(minidb_catalog_storage PUBLIC
 target_compile_features(minidb_catalog_storage PUBLIC cxx_std_20)
 target_link_libraries(minidb_catalog_storage PUBLIC minidb_storage)
 
+add_library(minidb_sql STATIC
+        src/sql/lexer.cpp
+        src/sql/parser.cpp)
+target_include_directories(minidb_sql PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(minidb_sql PUBLIC cxx_std_20)
+
 add_executable(db_test main.cpp)
 target_link_libraries(db_test PRIVATE minidb_storage)
 
@@ -63,4 +70,14 @@ if(BUILD_TESTING)
     target_link_libraries(catalog_storage_test PRIVATE minidb_catalog_storage)
     enable_test_assertions(catalog_storage_test)
     add_test(NAME catalog_storage_test COMMAND catalog_storage_test)
+
+    add_executable(sql_lexer_test tests/sql_lexer_test.cpp)
+    target_link_libraries(sql_lexer_test PRIVATE minidb_sql)
+    enable_test_assertions(sql_lexer_test)
+    add_test(NAME sql_lexer_test COMMAND sql_lexer_test)
+
+    add_executable(sql_parser_test tests/sql_parser_test.cpp)
+    target_link_libraries(sql_parser_test PRIVATE minidb_sql)
+    enable_test_assertions(sql_parser_test)
+    add_test(NAME sql_parser_test COMMAND sql_parser_test)
 endif()
