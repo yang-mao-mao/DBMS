@@ -275,9 +275,12 @@ Status RealStorageAdapter::create_index(
 
 Result<bool> RealStorageAdapter::has_index(
     TableId table_id, std::string_view name) const {
+    (void)name;
     const auto table = catalog_->find_table(table_id);
     if (!table.ok()) return table.status();
-    return catalog_->has_available_index(table_id, name);
+    // Catalog state alone cannot prove that the physical backend is usable.
+    // Keep this false until index_lookup has a real implementation.
+    return false;
 }
 
 Result<std::vector<RID>> RealStorageAdapter::index_lookup(
