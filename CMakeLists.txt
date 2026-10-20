@@ -44,6 +44,17 @@ target_link_libraries(minidb_query_engine PUBLIC
         minidb_catalog_storage
         minidb_sql)
 
+add_library(minidb_cli_lib STATIC
+        src/cli/cli.cpp)
+target_include_directories(minidb_cli_lib PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(minidb_cli_lib PUBLIC cxx_std_20)
+target_link_libraries(minidb_cli_lib PUBLIC minidb_query_engine)
+
+add_executable(minidb src/cli/main.cpp)
+target_compile_features(minidb PRIVATE cxx_std_20)
+target_link_libraries(minidb PRIVATE minidb_cli_lib)
+
 add_executable(db_test main.cpp)
 target_link_libraries(db_test PRIVATE minidb_storage)
 
@@ -104,4 +115,9 @@ if(BUILD_TESTING)
     target_link_libraries(database_test PRIVATE minidb_query_engine)
     enable_test_assertions(database_test)
     add_test(NAME database_test COMMAND database_test)
+
+    add_executable(cli_integration_test tests/cli_integration_test.cpp)
+    target_link_libraries(cli_integration_test PRIVATE minidb_cli_lib)
+    enable_test_assertions(cli_integration_test)
+    add_test(NAME cli_integration_test COMMAND cli_integration_test)
 endif()

@@ -17,6 +17,7 @@ struct QueryResult {
     std::vector<Row> rows;
     std::size_t affected_rows{0};
     std::optional<std::string> plan;
+    std::string message;
 
     [[nodiscard]] bool ok() const noexcept { return status.ok(); }
     [[nodiscard]] const std::string& error_message() const noexcept {
