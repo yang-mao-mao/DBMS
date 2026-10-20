@@ -30,6 +30,20 @@ target_include_directories(minidb_sql PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(minidb_sql PUBLIC cxx_std_20)
 
+add_library(minidb_query_engine STATIC
+        src/query/plan.cpp
+        src/query/planner.cpp
+        src/query/optimizer.cpp
+        src/execution/operators.cpp
+        src/execution/execution_engine.cpp
+        src/database/database.cpp)
+target_include_directories(minidb_query_engine PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(minidb_query_engine PUBLIC cxx_std_20)
+target_link_libraries(minidb_query_engine PUBLIC
+        minidb_catalog_storage
+        minidb_sql)
+
 add_executable(db_test main.cpp)
 target_link_libraries(db_test PRIVATE minidb_storage)
 
@@ -80,4 +94,14 @@ if(BUILD_TESTING)
     target_link_libraries(sql_parser_test PRIVATE minidb_sql)
     enable_test_assertions(sql_parser_test)
     add_test(NAME sql_parser_test COMMAND sql_parser_test)
+
+    add_executable(query_engine_test tests/query_engine_test.cpp)
+    target_link_libraries(query_engine_test PRIVATE minidb_query_engine)
+    enable_test_assertions(query_engine_test)
+    add_test(NAME query_engine_test COMMAND query_engine_test)
+
+    add_executable(database_test tests/database_test.cpp)
+    target_link_libraries(database_test PRIVATE minidb_query_engine)
+    enable_test_assertions(database_test)
+    add_test(NAME database_test COMMAND database_test)
 endif()
