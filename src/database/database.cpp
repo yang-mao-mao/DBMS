@@ -107,6 +107,7 @@ QueryResult Database::execute_create_table(
     if (!created.ok()) return failed(created.status());
     QueryResult result;
     result.affected_rows = 1;
+    result.message = "Table created.";
     return result;
 }
 
@@ -117,6 +118,7 @@ QueryResult Database::execute_insert(const sql::InsertStatement& statement) {
     if (!inserted.ok()) return failed(inserted.status());
     QueryResult result;
     result.affected_rows = 1;
+    result.message = "1 row inserted.";
     return result;
 }
 
@@ -132,6 +134,7 @@ QueryResult Database::execute_create_index(
     if (!status.ok()) return failed(status);
     QueryResult result;
     result.affected_rows = 1;
+    result.message = "Index created.";
     return result;
 }
 
