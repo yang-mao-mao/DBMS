@@ -385,3 +385,32 @@ DiskManager::~DiskManager() {
         file_.close();
     }
 }
+
+
+
+/*string a;
+ *i=m,j=n;
+ *while(i>=0 and j>=0){
+ *    if(c[i-1,j]==c[i,j-1]){
+ *        if(c[i,j]>c[i-1,j]){
+ *            a.add(x[i])
+ *            i-1
+ *            j-1
+ *            continue
+ *        }
+ *        else{
+ *            i-1
+ *            continue
+ *        }
+ *    }
+ *    else if(c[i-1,j]>c[i,j-1]){
+ *        i-1
+ *    }
+ *    else{
+ *        j-1
+ *    }
+ *
+ *}
+ *return res=a.turn
+ * 修复：补齐笔记的块注释结束符，避免阻塞缓冲池及存储测试的编译。
+ */
