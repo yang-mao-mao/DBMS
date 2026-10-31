@@ -9,9 +9,13 @@ add_library(minidb_storage STATIC
         storage/ci_pan_cun_chu.cpp
         storage/ci_pan_cun_chu.h
         storage/DiskManager.h
-        storage/DiskManager.cpp)
+        storage/DiskManager.cpp
+        buffer_pool/frame.h
+        buffer_pool/BufferPoolManager.h
+        buffer_pool/BufferPoolManager.cpp)
 target_include_directories(minidb_storage PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/storage)
+        ${CMAKE_CURRENT_SOURCE_DIR}/storage
+        ${CMAKE_CURRENT_SOURCE_DIR}/buffer_pool)
 target_compile_features(minidb_storage PUBLIC cxx_std_20)
 
 add_library(minidb_catalog_storage STATIC
@@ -120,4 +124,24 @@ if(BUILD_TESTING)
     target_link_libraries(cli_integration_test PRIVATE minidb_cli_lib)
     enable_test_assertions(cli_integration_test)
     add_test(NAME cli_integration_test COMMAND cli_integration_test)
+
+    add_executable(buffer_pool_test
+            buffer_pool/buffer_pool_test.cpp)
+    target_link_libraries(buffer_pool_test PRIVATE minidb_storage)
+    enable_test_assertions(buffer_pool_test)
+    foreach(test_case IN ITEMS
+            constructor_arguments frame_reset cache_hits_and_pins
+            page_types_and_invalid_arguments all_pinned_fetch
+            full_pool_new_page_noop dirty_eviction clean_eviction
+            dirty_flag_is_sticky flush_pinned_page flush_all_pages
+            flush_failure_preserves_dirty flush_all_continues_after_failure
+            invalid_fetch_preserves_cache corrupt_fetch_preserves_cache
+            failed_reads_preserve_capacity failed_eviction_preserves_victim
+            failed_new_page_rolls_back delete_pinned_and_reuse
+            delete_uncached_and_invalid delete_failure_preserves_cache
+            reject_free_page reject_meta_page destructor_persists_pages
+            destructor_continues_after_failure randomized_model)
+        add_test(NAME buffer_pool_${test_case}
+                COMMAND buffer_pool_test ${test_case})
+    endforeach()
 endif()
