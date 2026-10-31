@@ -10,7 +10,9 @@ add_executable(db_test main.cpp
         storage/DiskManager.cpp
         buffer_pool/frame.h
         buffer_pool/BufferPoolManager.h
-        buffer_pool/BufferPoolManager.cpp)
+        buffer_pool/BufferPoolManager.cpp
+        index/BPlusTree.cpp
+        index/BPlusTreePage.cpp)
 
 include(CTest)
 if(BUILD_TESTING)
