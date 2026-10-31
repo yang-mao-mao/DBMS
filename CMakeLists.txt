@@ -18,6 +18,14 @@ target_include_directories(minidb_storage PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/buffer_pool)
 target_compile_features(minidb_storage PUBLIC cxx_std_20)
 
+add_library(minidb_bplus_index STATIC
+        index/BPlusTreePage.cpp
+        index/BPlusTree.cpp)
+target_include_directories(minidb_bplus_index PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/index)
+target_compile_features(minidb_bplus_index PUBLIC cxx_std_20)
+target_link_libraries(minidb_bplus_index PUBLIC minidb_storage)
+
 add_library(minidb_catalog_storage STATIC
         src/catalog/catalog.cpp
         src/storage/row_codec.cpp
@@ -143,5 +151,32 @@ if(BUILD_TESTING)
             destructor_continues_after_failure randomized_model)
         add_test(NAME buffer_pool_${test_case}
                 COMMAND buffer_pool_test ${test_case})
+    endforeach()
+
+    add_executable(b_plus_tree_test index/b_plus_tree_test.cpp)
+    target_link_libraries(b_plus_tree_test PRIVATE minidb_bplus_index)
+    enable_test_assertions(b_plus_tree_test)
+    foreach(test_case IN ITEMS
+            internal_round_trip leaf_round_trip leaf_rejects_invalid_data malformed_payloads
+            header_round_trip node_persistence tree_insert_find
+            tree_reopen tree_leaf_split tree_invalid_open
+            tree_many_splits tree_shared_handles tree_internal_split
+            tree_descending split_failure_rollback
+            tree_pinned_pool tree_page_identity tree_corrupt_root tree_corrupt_branch randomized_model)
+        add_test(NAME index_${test_case}
+                COMMAND b_plus_tree_test ${test_case})
+    endforeach()
+
+    add_executable(b_plus_tree_operations_test
+            index/b_plus_tree_operations_test.cpp)
+    target_link_libraries(b_plus_tree_operations_test PRIVATE minidb_bplus_index)
+    enable_test_assertions(b_plus_tree_operations_test)
+    foreach(test_case IN ITEMS
+            scan_boundaries scan_multiple_pages scan_failure_preserves_output
+            erase_basics leaf_erase_rebalance erase_reclaim_failure
+            erase_failure_preserves_tree erase_all_reuse internal_erase_rebalance
+            mixed_randomized_model erase_cascade_reopen operations_pinned_pool)
+        add_test(NAME index_${test_case}
+                COMMAND b_plus_tree_operations_test ${test_case})
     endforeach()
 endif()
