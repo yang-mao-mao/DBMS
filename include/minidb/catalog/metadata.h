@@ -54,6 +54,9 @@ struct IndexMetadata {
     std::vector<std::uint32_t> key_columns;
     std::filesystem::path storage_file;
     IndexState state{IndexState::Building};
+    // BPlusTree::create() 返回的稳定入口页。该页号由物理索引分配，
+    // 不能由上层根据文件布局猜测。
+    std::uint32_t header_page_id{0};
 
     bool operator==(const IndexMetadata&) const = default;
 };

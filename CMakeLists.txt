@@ -29,11 +29,14 @@ target_link_libraries(minidb_bplus_index PUBLIC minidb_storage)
 add_library(minidb_catalog_storage STATIC
         src/catalog/catalog.cpp
         src/storage/row_codec.cpp
+        src/storage/bplus_index_adapter.cpp
         src/storage/real_storage_adapter.cpp)
 target_include_directories(minidb_catalog_storage PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(minidb_catalog_storage PUBLIC cxx_std_20)
-target_link_libraries(minidb_catalog_storage PUBLIC minidb_storage)
+target_link_libraries(minidb_catalog_storage PUBLIC
+        minidb_storage
+        minidb_bplus_index)
 
 add_library(minidb_sql STATIC
         src/sql/lexer.cpp

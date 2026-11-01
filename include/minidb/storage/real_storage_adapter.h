@@ -46,6 +46,8 @@ private:
 
     [[nodiscard]] std::filesystem::path table_path(
         const TableMetadata& table) const;
+    [[nodiscard]] std::filesystem::path index_path(
+        const IndexMetadata& index) const;
 
     std::unique_ptr<Catalog> catalog_;
 };

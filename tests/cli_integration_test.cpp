@@ -90,14 +90,11 @@ void test_multiline_sql_table_output_errors_and_explain() {
            != std::string::npos);
     assert(result.standard_output.find("Filter(id = 1)")
            != std::string::npos);
-    assert(result.standard_output.find("TableScan(table=students)")
+    assert(result.standard_output.find("Index created.") != std::string::npos);
+    assert(result.standard_output.find("IndexScan(table=students")
            != std::string::npos);
-    assert(result.standard_output.find("IndexScan") == std::string::npos);
     assert(result.standard_output.find("Bye!") != std::string::npos);
 
-    assert(result.standard_error.find(
-               "physical hash index backend is not implemented")
-           != std::string::npos);
     assert(result.standard_error.find("unsupported or missing SQL statement")
            != std::string::npos);
 

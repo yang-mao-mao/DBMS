@@ -168,6 +168,7 @@ std::unique_ptr<minidb::Catalog> make_catalog(
     index.key_columns = {0};
     index.storage_file = "indexes/students_id.mock";
     index.state = minidb::IndexState::Available;
+    index.header_page_id = 1;
     assert(catalog->register_index(index).ok());
     return catalog;
 }

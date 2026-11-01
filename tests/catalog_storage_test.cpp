@@ -127,13 +127,36 @@ void test_create_insert_scan_rid_and_restart() {
         const std::vector<std::uint32_t> keys{0};
         const auto create_index = adapter->create_index(
             users, "idx_users_id", keys);
-        assert(!create_index.ok());
-        assert(create_index.code() == minidb::ErrorCode::Unsupported);
+        assert(create_index.ok());
+        assert(std::filesystem::exists(
+            database.path() / "indexes" / "index_1.mdb"));
+
+        has_index = adapter->has_index(users, "idx_users_id");
+        assert(has_index.ok() && has_index.value());
 
         auto lookup = adapter->index_lookup(
             users, "idx_users_id", minidb::Value{std::int64_t{1}});
-        assert(!lookup.ok());
-        assert(lookup.status().code() == minidb::ErrorCode::Unsupported);
+        assert(lookup.ok() && lookup.value().size() == 1);
+        assert(lookup.value().front() == alice_rid);
+
+        auto indexed_insert = adapter->insert_row(
+            users, minidb::Row{std::int64_t{33}, std::string("Dora")});
+        assert(indexed_insert.ok());
+        lookup = adapter->index_lookup(
+            users, "idx_users_id", minidb::Value{std::int64_t{33}});
+        assert(lookup.ok() && lookup.value().size() == 1);
+        assert(lookup.value().front() == indexed_insert.value());
+
+        auto duplicate_key = adapter->insert_row(
+            users, minidb::Row{std::int64_t{33}, std::string("Duplicate")});
+        assert(!duplicate_key.ok());
+        assert(duplicate_key.status().code() == minidb::ErrorCode::AlreadyExists);
+
+        const std::vector<std::uint32_t> varchar_key{1};
+        const auto varchar_index = adapter->create_index(
+            users, "idx_users_name", varchar_key);
+        assert(!varchar_index.ok());
+        assert(varchar_index.code() == minidb::ErrorCode::Unsupported);
     }
 
     // Catalog can persist a future physical index in Building state without
@@ -145,9 +168,9 @@ void test_create_insert_scan_rid_and_restart() {
         minidb::IndexMetadata index;
         index.id = catalog->next_index_id();
         index.table_id = users;
-        index.name = "idx_users_id";
-        index.key_columns = {0};
-        index.storage_file = "indexes/index_1.mdb";
+        index.name = "idx_building_only";
+        index.key_columns = {1};
+        index.storage_file = "indexes/index_2.mdb";
         index.state = minidb::IndexState::Building;
         assert(catalog->register_index(index).ok());
     }
@@ -178,13 +201,21 @@ void test_create_insert_scan_rid_and_restart() {
             if (!next.value()) break;
             ++count;
         }
-        assert(count == 32);
+        assert(count == 33);
 
         auto index = adapter->catalog().find_index(users, "idx_users_id");
         assert(index.ok());
-        assert(index.value().state == minidb::IndexState::Building);
+        assert(index.value().state == minidb::IndexState::Available);
+        assert(index.value().header_page_id != 0);
         auto has_index = adapter->has_index(users, "idx_users_id");
-        assert(has_index.ok() && !has_index.value());
+        assert(has_index.ok() && has_index.value());
+        auto lookup = adapter->index_lookup(
+            users, "idx_users_id", minidb::Value{std::int64_t{1}});
+        assert(lookup.ok() && lookup.value().size() == 1);
+        assert(lookup.value().front() == alice_rid);
+
+        auto building = adapter->has_index(users, "idx_building_only");
+        assert(building.ok() && !building.value());
     }
 }
 

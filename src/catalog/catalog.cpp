@@ -17,7 +17,8 @@ namespace minidb {
 namespace {
 
 constexpr std::uint32_t CATALOG_MAGIC = 0x31544143u; // "CAT1"
-constexpr std::uint16_t CATALOG_VERSION = 1;
+constexpr std::uint16_t CATALOG_VERSION = 2;
+constexpr std::uint16_t CATALOG_MIN_READABLE_VERSION = 1;
 constexpr std::uint8_t TABLE_RECORD = 1;
 constexpr std::uint8_t INDEX_RECORD = 2;
 constexpr std::size_t MAX_PAGE_RECORD_SIZE =
@@ -168,6 +169,7 @@ Result<std::vector<std::byte>> encode_index(const IndexMetadata& index) {
         return Status::invalid_argument("catalog index metadata is too large");
     }
     append_integer(output, static_cast<std::uint8_t>(index.state));
+    append_integer(output, index.header_page_id);
     append_integer(
         output, static_cast<std::uint32_t>(index.key_columns.size()));
     for (const std::uint32_t column : index.key_columns) {
@@ -190,7 +192,9 @@ Result<CatalogRecord> decode_record(std::span<const std::byte> bytes) {
         || !read_integer(bytes, offset, reserved)) {
         return Status::corruption("catalog record header is truncated");
     }
-    if (magic != CATALOG_MAGIC || version != CATALOG_VERSION || reserved != 0) {
+    if (magic != CATALOG_MAGIC
+        || version < CATALOG_MIN_READABLE_VERSION
+        || version > CATALOG_VERSION || reserved != 0) {
         return Status::corruption("catalog record header is invalid");
     }
 
@@ -253,8 +257,14 @@ Result<CatalogRecord> decode_record(std::span<const std::byte> bytes) {
             || !read_integer(bytes, offset, index.table_id)
             || !read_string(bytes, offset, index.name)
             || !read_string(bytes, offset, file)
-            || !read_integer(bytes, offset, state)
-            || !read_integer(bytes, offset, key_count)) {
+            || !read_integer(bytes, offset, state)) {
+            return Status::corruption("catalog index record is truncated");
+        }
+        if (version >= 2
+            && !read_integer(bytes, offset, index.header_page_id)) {
+            return Status::corruption("catalog index header page is truncated");
+        }
+        if (!read_integer(bytes, offset, key_count)) {
             return Status::corruption("catalog index record is truncated");
         }
         if (key_count > (bytes.size() - offset) / sizeof(std::uint32_t)) {
@@ -277,6 +287,8 @@ Result<CatalogRecord> decode_record(std::span<const std::byte> bytes) {
         if (offset != bytes.size() || index.id == 0 || index.table_id == 0
             || index.id == std::numeric_limits<IndexId>::max()
             || index.name.empty() || index.key_columns.empty()
+            || (index.state == IndexState::Available
+                && index.header_page_id == 0)
             || !is_safe_relative_path(index.storage_file)) {
             return Status::corruption("catalog index metadata is invalid");
         }
@@ -496,6 +508,11 @@ Status Catalog::register_index(IndexMetadata metadata) {
     if (!is_safe_relative_path(metadata.storage_file)) {
         return Status::invalid_argument(
             "index storage file must be a safe relative path");
+    }
+    if (metadata.state == IndexState::Available
+        && metadata.header_page_id == 0) {
+        return Status::invalid_argument(
+            "available index metadata requires a B+ tree header page");
     }
     const auto table = impl_->tables.find(metadata.table_id);
     if (table == impl_->tables.end()) {

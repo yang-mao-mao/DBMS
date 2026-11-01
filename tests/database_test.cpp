@@ -121,6 +121,28 @@ void test_database_end_to_end() {
 
     result = database->execute(
         "CREATE INDEX idx_students_id ON students(id);");
+    assert_ok(result);
+    assert(result.affected_rows == 1);
+
+    result = database->execute(
+        "SELECT name FROM students WHERE id = 2;");
+    assert_ok(result);
+    assert(result.rows.size() == 1);
+    assert(std::get<std::string>(result.rows[0][0]) == "Bob");
+    assert(result.plan->find("IndexScan") != std::string::npos);
+
+    result = database->execute(
+        "EXPLAIN SELECT name FROM students WHERE id = 1;");
+    assert_ok(result);
+    assert(result.plan->find("IndexScan") != std::string::npos);
+
+    result = database->execute(
+        "INSERT INTO students VALUES (2, 'Duplicate', 99);");
+    assert(!result.ok());
+    assert(result.status.code() == minidb::ErrorCode::AlreadyExists);
+
+    result = database->execute(
+        "CREATE INDEX idx_students_name ON students(name);");
     assert(!result.ok());
     assert(result.status.code() == minidb::ErrorCode::Unsupported);
 }
@@ -133,6 +155,7 @@ void test_database_restart() {
         auto database = std::move(opened).value();
         assert_ok(database->execute("CREATE TABLE t (id INT);"));
         assert_ok(database->execute("INSERT INTO t VALUES (42);"));
+        assert_ok(database->execute("CREATE INDEX idx_t_id ON t(id);"));
     }
     auto reopened = minidb::Database::open(directory.path());
     assert(reopened.ok());
@@ -141,6 +164,9 @@ void test_database_restart() {
     assert_ok(result);
     assert(result.rows.size() == 1);
     assert(std::get<std::int64_t>(result.rows[0][0]) == 42);
+    const auto indexed = database->execute("SELECT id FROM t WHERE id = 42;");
+    assert_ok(indexed);
+    assert(indexed.plan->find("IndexScan") != std::string::npos);
 }
 
 void test_catalog_metadata_cannot_fake_a_physical_index() {
@@ -167,14 +193,12 @@ void test_catalog_metadata_cannot_fake_a_physical_index() {
         index.key_columns = {0};
         index.storage_file = "indexes/index_1.mdb";
         index.state = minidb::IndexState::Available;
+        index.header_page_id = 1;
         assert(catalog->register_index(index).ok());
     }
     auto reopened = minidb::RealStorageAdapter::open(directory.path());
-    assert(reopened.ok());
-    auto storage = std::move(reopened).value();
-    auto available = storage->has_index(table_id, "idx_id");
-    assert(available.ok());
-    assert(!available.value());
+    assert(!reopened.ok());
+    assert(reopened.status().code() == minidb::ErrorCode::Corruption);
 }
 
 } // namespace

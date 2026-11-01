@@ -1,6 +1,7 @@
 #include "minidb/storage/real_storage_adapter.h"
 
 #include "DiskManager.h"
+#include "minidb/storage/bplus_index_adapter.h"
 #include "minidb/storage/row_codec.h"
 
 #include <cstddef>
@@ -114,6 +115,15 @@ Result<std::unique_ptr<RealStorageAdapter>> RealStorageAdapter::open(
                 "catalog refers to an invalid table file: "
                 + table.storage_file.generic_string());
         }
+        for (const auto& index : adapter->catalog_->list_indexes(table.id)) {
+            if (index.state != IndexState::Available) continue;
+            auto physical = BPlusIndexAdapter::open(
+                adapter->index_path(index), index.header_page_id);
+            if (!physical.ok()) {
+                return Status::corruption(
+                    "available index cannot be opened: " + index.name);
+            }
+        }
     }
     return adapter;
 }
@@ -121,6 +131,11 @@ Result<std::unique_ptr<RealStorageAdapter>> RealStorageAdapter::open(
 std::filesystem::path RealStorageAdapter::table_path(
     const TableMetadata& table) const {
     return catalog_->database_directory() / table.storage_file;
+}
+
+std::filesystem::path RealStorageAdapter::index_path(
+    const IndexMetadata& index) const {
+    return catalog_->database_directory() / index.storage_file;
 }
 
 Result<TableId> RealStorageAdapter::create_table(
@@ -186,11 +201,37 @@ Result<RID> RealStorageAdapter::insert_row(TableId table_id, const Row& row) {
             "encoded row does not fit in one storage page");
     }
 
+    // 唯一索引先检查重复键，避免已知冲突发生后才写入表记录。
+    const auto indexes = catalog_->list_indexes(table_id);
+    for (const auto& index : indexes) {
+        if (index.state != IndexState::Available) continue;
+        if (index.key_columns.size() != 1
+            || index.key_columns.front() >= row.size()) {
+            return Status::corruption("available index metadata is invalid");
+        }
+        const auto* key = std::get_if<std::int64_t>(
+            &row[index.key_columns.front()]);
+        if (!key) {
+            return Status::invalid_argument(
+                "B+ tree index key must be a non-NULL INT64 value");
+        }
+        auto physical = BPlusIndexAdapter::open(
+            index_path(index), index.header_page_id);
+        if (!physical.ok()) return physical.status();
+        auto existing = physical.value()->lookup(*key);
+        if (!existing.ok()) return existing.status();
+        if (!existing.value().empty()) {
+            return Status::already_exists(
+                "duplicate key for unique B+ tree index: " + index.name);
+        }
+    }
+
     auto manager = DiskManager::open(table_path(table).string());
     if (!manager) return Status::io_error("failed to open table storage file");
 
     const auto* data = reinterpret_cast<const char*>(encoded.value().data());
     const auto length = static_cast<std::uint16_t>(encoded.value().size());
+    std::optional<RID> inserted_rid;
     for (std::uint32_t page_id = 1; page_id < manager->page_count(); ++page_id) {
         Page page{};
         if (!manager->read_page(page_id, page)) {
@@ -202,25 +243,44 @@ Result<RID> RealStorageAdapter::insert_row(TableId table_id, const Row& row) {
         if (!manager->write_page(page_id, page)) {
             return Status::io_error("failed to write a table page");
         }
-        return RID{page_id, static_cast<std::uint16_t>(slot)};
+        inserted_rid = RID{page_id, static_cast<std::uint16_t>(slot)};
+        break;
     }
 
-    const std::uint32_t page_id = manager->allocate_page(PageType::DATA);
-    if (page_id == INVALID_PAGE) {
-        return Status::no_space("failed to allocate a table page");
+    if (!inserted_rid) {
+        const std::uint32_t page_id = manager->allocate_page(PageType::DATA);
+        if (page_id == INVALID_PAGE) {
+            return Status::no_space("failed to allocate a table page");
+        }
+        Page page{};
+        if (!manager->read_page(page_id, page)) {
+            return Status::io_error("failed to read a new table page");
+        }
+        const int slot = page.insert_record(data, length);
+        if (slot < 0) {
+            return Status::internal_error("new table page rejected a valid row");
+        }
+        if (!manager->write_page(page_id, page)) {
+            return Status::io_error("failed to persist a new table page");
+        }
+        inserted_rid = RID{page_id, static_cast<std::uint16_t>(slot)};
     }
-    Page page{};
-    if (!manager->read_page(page_id, page)) {
-        return Status::io_error("failed to read a new table page");
+    manager.reset();
+
+    // 当前没有跨表文件与索引文件的 WAL；预检查消除了重复键失败，剩余
+    // I/O 失败会明确上报而不伪造成功。
+    for (const auto& index : indexes) {
+        if (index.state != IndexState::Available) continue;
+        const auto key = std::get<std::int64_t>(row[index.key_columns.front()]);
+        auto physical = BPlusIndexAdapter::open(
+            index_path(index), index.header_page_id);
+        if (!physical.ok()) return physical.status();
+        const Status inserted = physical.value()->insert(key, *inserted_rid);
+        if (!inserted.ok()) return inserted;
+        const Status flushed = physical.value()->flush();
+        if (!flushed.ok()) return flushed;
     }
-    const int slot = page.insert_record(data, length);
-    if (slot < 0) {
-        return Status::internal_error("new table page rejected a valid row");
-    }
-    if (!manager->write_page(page_id, page)) {
-        return Status::io_error("failed to persist a new table page");
-    }
-    return RID{page_id, static_cast<std::uint16_t>(slot)};
+    return *inserted_rid;
 }
 
 Result<std::unique_ptr<RowCursor>> RealStorageAdapter::scan_rows(
@@ -265,32 +325,123 @@ Result<std::optional<RowRecord>> RealStorageAdapter::get_row_by_rid(
 Status RealStorageAdapter::create_index(
     TableId table_id, std::string_view name,
     std::span<const std::uint32_t> key_columns) {
-    (void)name;
-    (void)key_columns;
-    const auto table = catalog_->find_table(table_id);
-    if (!table.ok()) return table.status();
-    return Status::unsupported(
-        "the physical hash index backend is not implemented yet");
+    const auto table_result = catalog_->find_table(table_id);
+    if (!table_result.ok()) return table_result.status();
+    const auto& table = table_result.value();
+    const auto existing = catalog_->find_index(table_id, name);
+    if (existing.ok()) return Status::already_exists("index already exists");
+    if (existing.status().code() != ErrorCode::NotFound) return existing.status();
+    if (name.empty()) return Status::invalid_argument("index name cannot be empty");
+    if (key_columns.size() != 1) {
+        return Status::unsupported(
+            "B+ tree indexes currently support exactly one key column");
+    }
+    const std::uint32_t column = key_columns.front();
+    if (column >= table.schema.columns.size()) {
+        return Status::invalid_argument("index key column is out of range");
+    }
+    if (table.schema.columns[column].type != DataType::Int64) {
+        return Status::unsupported(
+            "B+ tree indexes currently support INT64 columns only");
+    }
+
+    IndexMetadata metadata;
+    metadata.id = catalog_->next_index_id();
+    metadata.table_id = table_id;
+    metadata.name = std::string(name);
+    metadata.key_columns.assign(key_columns.begin(), key_columns.end());
+    metadata.storage_file = std::filesystem::path("indexes")
+        / ("index_" + std::to_string(metadata.id) + ".mdb");
+    metadata.state = IndexState::Available;
+    const auto path = index_path(metadata);
+
+    auto physical_result = BPlusIndexAdapter::create(path);
+    if (!physical_result.ok()) return physical_result.status();
+    auto physical = std::move(physical_result).value();
+    metadata.header_page_id = physical->header_page_id();
+    auto cleanup = [&]() {
+        physical.reset();
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+    };
+
+    auto cursor_result = scan_rows(table_id);
+    if (!cursor_result.ok()) {
+        cleanup();
+        return cursor_result.status();
+    }
+    auto cursor = std::move(cursor_result).value();
+    while (true) {
+        auto next = cursor->next();
+        if (!next.ok()) {
+            cleanup();
+            return next.status();
+        }
+        if (!next.value()) break;
+        const auto* key = std::get_if<std::int64_t>(
+            &next.value()->row[column]);
+        if (!key) {
+            cleanup();
+            return Status::invalid_argument(
+                "B+ tree index key must be a non-NULL INT64 value");
+        }
+        const Status inserted = physical->insert(*key, next.value()->rid);
+        if (!inserted.ok()) {
+            cleanup();
+            return inserted.code() == ErrorCode::AlreadyExists
+                ? Status::already_exists(
+                      "cannot create a unique B+ tree index over duplicate keys")
+                : inserted;
+        }
+    }
+    const Status flushed = physical->flush();
+    if (!flushed.ok()) {
+        cleanup();
+        return flushed;
+    }
+    physical.reset();
+    const Status registered = catalog_->register_index(std::move(metadata));
+    if (!registered.ok()) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        return registered;
+    }
+    return Status::ok_status();
 }
 
 Result<bool> RealStorageAdapter::has_index(
     TableId table_id, std::string_view name) const {
-    (void)name;
     const auto table = catalog_->find_table(table_id);
     if (!table.ok()) return table.status();
-    // Catalog state alone cannot prove that the physical backend is usable.
-    // Keep this false until index_lookup has a real implementation.
-    return false;
+    const auto index = catalog_->find_index(table_id, name);
+    if (!index.ok()) {
+        if (index.status().code() == ErrorCode::NotFound) return false;
+        return index.status();
+    }
+    if (index.value().state != IndexState::Available) return false;
+    auto physical = BPlusIndexAdapter::open(
+        index_path(index.value()), index.value().header_page_id);
+    if (!physical.ok()) return physical.status();
+    return true;
 }
 
 Result<std::vector<RID>> RealStorageAdapter::index_lookup(
     TableId table_id, std::string_view name, const Value& key) const {
-    (void)name;
-    (void)key;
     const auto table = catalog_->find_table(table_id);
     if (!table.ok()) return table.status();
-    return Status::unsupported(
-        "the physical hash index backend is not implemented yet");
+    const auto index = catalog_->find_index(table_id, name);
+    if (!index.ok()) return index.status();
+    if (index.value().state != IndexState::Available) {
+        return Status::unsupported("index is not available");
+    }
+    const auto* integer = std::get_if<std::int64_t>(&key);
+    if (!integer) {
+        return Status::invalid_argument("B+ tree lookup key must be INT64");
+    }
+    auto physical = BPlusIndexAdapter::open(
+        index_path(index.value()), index.value().header_page_id);
+    if (!physical.ok()) return physical.status();
+    return physical.value()->lookup(*integer);
 }
 
 } // namespace minidb
