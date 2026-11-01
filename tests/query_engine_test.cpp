@@ -5,6 +5,8 @@
 #include "minidb/sql/parser.h"
 #include "minidb/storage/table_storage.h"
 
+// 使用可控表级存储验证计划绑定、优化规则和 Volcano 算子组合。
+
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -98,6 +100,10 @@ public:
             if (row.rid == rid) return std::optional<minidb::RowRecord>{row};
         }
         return std::optional<minidb::RowRecord>{};
+    }
+
+    minidb::Status delete_row(minidb::TableId, minidb::RID) override {
+        return minidb::Status::unsupported("not needed by this mock");
     }
 
     minidb::Status create_index(

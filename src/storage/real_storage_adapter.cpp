@@ -19,6 +19,8 @@ namespace {
 constexpr std::size_t MAX_PAGE_RECORD_SIZE =
     PAGE_SIZE - sizeof(PageHeader) - sizeof(Slot);
 
+// 磁盘扫描游标按 page_id、slot_id 顺序懒加载记录；删除槽被跳过，
+// 因而执行引擎无需一次性把整张表读入内存。
 class DiskRowCursor final : public RowCursor {
 public:
     DiskRowCursor(std::unique_ptr<DiskManager> manager, TableSchema schema)
@@ -148,6 +150,7 @@ Result<TableId> RealStorageAdapter::create_table(
         return existing.status();
     }
 
+    // 一表一文件：Catalog 保存相对路径，真实文件由 DiskManager 初始化。
     const TableId id = catalog_->next_table_id();
     TableMetadata metadata;
     metadata.id = id;
@@ -193,6 +196,7 @@ Result<RID> RealStorageAdapter::insert_row(TableId table_id, const Row& row) {
     if (!table_result.ok()) return table_result.status();
     const TableMetadata table = std::move(table_result).value();
 
+    // 关系行先经 RowCodec 校验并编码，再交给底层页内记录接口。
     auto encoded = RowCodec::encode(table.schema, row);
     if (!encoded.ok()) return encoded.status();
     if (encoded.value().size() > MAX_PAGE_RECORD_SIZE
@@ -320,6 +324,120 @@ Result<std::optional<RowRecord>> RealStorageAdapter::get_row_by_rid(
     if (!decoded.ok()) return decoded.status();
     return std::optional<RowRecord>{
         RowRecord{rid, std::move(decoded).value()}};
+}
+
+Status RealStorageAdapter::delete_row(TableId table_id, RID rid) {
+    auto table_result = catalog_->find_table(table_id);
+    if (!table_result.ok()) return table_result.status();
+    const TableMetadata table = std::move(table_result).value();
+
+    auto record_result = get_row_by_rid(table_id, rid);
+    if (!record_result.ok()) return record_result.status();
+    if (!record_result.value()) {
+        return Status::not_found("record RID does not exist or is already deleted");
+    }
+    const Row& row = record_result.value()->row;
+
+    struct PreparedIndex {
+        std::int64_t key{0};
+        std::unique_ptr<BPlusIndexAdapter> physical;
+        bool erased{false};
+    };
+    std::vector<PreparedIndex> prepared;
+    for (const auto& index : catalog_->list_indexes(table_id)) {
+        if (index.state != IndexState::Available) continue;
+        if (index.key_columns.size() != 1
+            || index.key_columns.front() >= row.size()) {
+            return Status::corruption("available index metadata is invalid");
+        }
+        const auto* key = std::get_if<std::int64_t>(
+            &row[index.key_columns.front()]);
+        if (!key) {
+            return Status::corruption(
+                "available B+ tree index refers to a non-INT64 row value");
+        }
+        auto physical = BPlusIndexAdapter::open(
+            index_path(index), index.header_page_id);
+        if (!physical.ok()) return physical.status();
+        auto lookup = physical.value()->lookup(*key);
+        if (!lookup.ok()) return lookup.status();
+        if (lookup.value().size() != 1 || lookup.value().front() != rid) {
+            return Status::corruption(
+                "available B+ tree index does not match the row RID");
+        }
+        prepared.push_back(
+            PreparedIndex{*key, std::move(physical).value(), false});
+    }
+
+    auto rollback_indexes = [&prepared, rid]() {
+        bool restored = true;
+        for (auto current = prepared.rbegin(); current != prepared.rend(); ++current) {
+            if (!current->erased) continue;
+            const Status inserted = current->physical->insert(current->key, rid);
+            const Status flushed = current->physical->flush();
+            restored = restored && inserted.ok() && flushed.ok();
+            current->erased = false;
+        }
+        return restored;
+    };
+
+    for (auto& index : prepared) {
+        const Status erased = index.physical->erase(index.key, rid);
+        if (!erased.ok()) {
+            if (!rollback_indexes()) {
+                return Status::corruption(
+                    "index deletion failed and rollback could not restore all entries");
+            }
+            return erased;
+        }
+        index.erased = true;
+        const Status flushed = index.physical->flush();
+        if (!flushed.ok()) {
+            if (!rollback_indexes()) {
+                return Status::corruption(
+                    "index flush failed and rollback could not restore all entries");
+            }
+            return flushed;
+        }
+    }
+
+    auto manager = DiskManager::open(table_path(table).string());
+    if (!manager) {
+        if (!rollback_indexes()) {
+            return Status::corruption(
+                "table open failed and rollback could not restore all index entries");
+        }
+        return Status::io_error("failed to open table storage file for deletion");
+    }
+    if (rid.page_id == 0 || !manager->is_valid_page(rid.page_id)) {
+        (void)rollback_indexes();
+        return Status::not_found("record RID page does not exist");
+    }
+    Page page{};
+    if (!manager->read_page(rid.page_id, page)) {
+        const bool restored = rollback_indexes();
+        return restored
+            ? Status::io_error("failed to read record page for deletion")
+            : Status::corruption(
+                  "record page read failed and index rollback was incomplete");
+    }
+    if (page.header.page_type != PageType::DATA
+        || rid.slot_id >= page.slot_count()
+        || !page.delete_record(rid.slot_id)) {
+        const bool restored = rollback_indexes();
+        return restored
+            ? Status::not_found("record RID does not exist or is already deleted")
+            : Status::corruption(
+                  "record deletion failed and index rollback was incomplete");
+    }
+    if (!manager->write_page(rid.page_id, page)) {
+        const bool restored = rollback_indexes();
+        return restored
+            ? Status::io_error("failed to persist deleted record page")
+            : Status::corruption(
+                  "record write failed and index rollback was incomplete");
+    }
+    return Status::ok_status();
 }
 
 Status RealStorageAdapter::create_index(

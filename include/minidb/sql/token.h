@@ -6,6 +6,7 @@
 
 namespace minidb::sql {
 
+// 词法单元类型。关键字在 Lexer 中按大小写不敏感方式识别。
 enum class TokenKind {
     End,
     Identifier,
@@ -18,6 +19,7 @@ enum class TokenKind {
     Into,
     Values,
     Select,
+    Delete,
     From,
     Where,
     Index,
@@ -39,6 +41,7 @@ enum class TokenKind {
     GreaterEqual,
 };
 
+// Token 起始位置，用于生成精确到行、列的错误诊断。
 struct SourcePosition {
     std::size_t offset{0};
     std::size_t line{1};
@@ -47,6 +50,7 @@ struct SourcePosition {
     bool operator==(const SourcePosition&) const = default;
 };
 
+// text 保存原始词素（字符串字面量保存转义后的内容）。
 struct Token {
     TokenKind kind{TokenKind::End};
     std::string text;

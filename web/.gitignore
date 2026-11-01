@@ -1,0 +1,9 @@
+node_modules/
+.npm-cli/
+dist/
+coverage/
+bridge/build/
+my_database/
+demo_real_database/
+.env.local
+*.log

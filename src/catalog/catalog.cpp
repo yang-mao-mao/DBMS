@@ -16,6 +16,8 @@
 namespace minidb {
 namespace {
 
+// Catalog 以版本化二进制记录持久化：文件头魔数用于识别格式，
+// 每条页内记录再用类型字节区分表元数据和索引元数据。
 constexpr std::uint32_t CATALOG_MAGIC = 0x31544143u; // "CAT1"
 constexpr std::uint16_t CATALOG_VERSION = 2;
 constexpr std::uint16_t CATALOG_MIN_READABLE_VERSION = 1;
@@ -73,6 +75,7 @@ bool read_string(std::span<const std::byte> input,
     return true;
 }
 
+// 在元数据落盘前集中验证表名、字段名、类型和长度约束。
 Status validate_schema(const TableSchema& schema) {
     if (schema.name.empty()) {
         return Status::invalid_argument("table name cannot be empty");
@@ -123,6 +126,7 @@ bool is_safe_relative_path(const std::filesystem::path& path) {
     return true;
 }
 
+// 下列 encode/decode 函数定义 Catalog 的稳定磁盘格式，整数统一小端序。
 Result<std::vector<std::byte>> encode_table(const TableMetadata& table) {
     std::vector<std::byte> output;
     append_integer(output, CATALOG_MAGIC);
@@ -298,6 +302,7 @@ Result<CatalogRecord> decode_record(std::span<const std::byte> bytes) {
     return Status::corruption("unknown catalog record type");
 }
 
+// 优先写入已有空闲空间；没有合适数据页时再申请新页。
 Status append_record(DiskManager& manager, std::span<const std::byte> bytes) {
     if (bytes.empty() || bytes.size() > MAX_PAGE_RECORD_SIZE
         || bytes.size() > std::numeric_limits<std::uint16_t>::max()) {
@@ -340,6 +345,7 @@ Status append_record(DiskManager& manager, std::span<const std::byte> bytes) {
 
 } // namespace
 
+// PImpl 隔离持久化实现细节，并建立按 ID/名称查询的内存索引。
 struct Catalog::Impl {
     std::unique_ptr<DiskManager> manager;
     std::unordered_map<TableId, TableMetadata> tables;
@@ -379,6 +385,7 @@ Result<std::unique_ptr<Catalog>> Catalog::open(
     return catalog;
 }
 
+// 启动恢复：顺序扫描 Catalog 文件中的页内记录并重建内存映射。
 Status Catalog::load() {
     for (std::uint32_t page_id = 1;
          page_id < impl_->manager->page_count(); ++page_id) {
@@ -448,6 +455,7 @@ IndexId Catalog::next_index_id() const noexcept {
     return impl_->next_index_id;
 }
 
+// 先持久化再更新内存状态，避免写盘失败却对本进程可见。
 Status Catalog::register_table(TableMetadata metadata) {
     const Status schema_status = validate_schema(metadata.schema);
     if (!schema_status.ok()) return schema_status;

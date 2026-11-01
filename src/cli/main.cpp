@@ -7,6 +7,7 @@
 #include <utility>
 
 int main(int argc, char* argv[]) {
+    // 命令行第一个参数是数据库目录；省略时使用当前目录下的 minidb_data。
     if (argc > 2) {
         std::cerr << "Usage: minidb [database_directory]\n";
         return 2;

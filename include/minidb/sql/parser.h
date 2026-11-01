@@ -11,10 +11,13 @@
 
 namespace minidb::sql {
 
+// 针对 MiniDB SQL 子集的递归下降 Parser。
+// Parser 只构造 AST，不访问 Catalog，也不执行数据库操作。
 class Parser {
 public:
     explicit Parser(std::span<const Token> tokens) : tokens_(tokens) {}
 
+    // 解析一条完整语句，并拒绝分号之后的多余 Token。
     [[nodiscard]] Result<Statement> parse_statement();
 
 private:
@@ -28,6 +31,7 @@ private:
     [[nodiscard]] CreateIndexStatement parse_create_index();
     [[nodiscard]] InsertStatement parse_insert();
     [[nodiscard]] SelectStatement parse_select();
+    [[nodiscard]] DeleteStatement parse_delete();
     [[nodiscard]] ExplainStatement parse_explain();
     [[nodiscard]] ColumnDefinition parse_column_definition();
     [[nodiscard]] Value parse_literal();
@@ -37,6 +41,7 @@ private:
     std::size_t current_index_{0};
 };
 
+// 便捷入口：依次执行 Lexer 和 Parser。
 [[nodiscard]] Result<Statement> parse_sql(std::string_view sql_text);
 
 } // namespace minidb::sql

@@ -25,6 +25,7 @@ public:
     BPlusIndexAdapter& operator=(const BPlusIndexAdapter&) = delete;
 
     [[nodiscard]] Status insert(std::int64_t key, RID rid);
+    [[nodiscard]] Status erase(std::int64_t key, RID expected_rid);
     [[nodiscard]] Result<std::vector<RID>> lookup(std::int64_t key) const;
     [[nodiscard]] Status flush();
     [[nodiscard]] std::uint32_t header_page_id() const noexcept;

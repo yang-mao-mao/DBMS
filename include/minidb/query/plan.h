@@ -13,6 +13,7 @@
 
 namespace minidb::query {
 
+// 计划节点既描述逻辑算子，也作为执行引擎构造物理算子的输入。
 enum class PlanNodeKind {
     TableScan,
     IndexScan,
@@ -20,6 +21,7 @@ enum class PlanNodeKind {
     Project,
 };
 
+// 经 Planner 校验和绑定后的谓词；执行阶段无需再次按名称查找字段。
 struct BoundPredicate {
     std::string column_name;
     std::uint32_t column_index{0};
@@ -28,6 +30,7 @@ struct BoundPredicate {
     Value value;
 };
 
+// 所有计划节点的基类。计划树由 unique_ptr 独占，父节点拥有子节点。
 class PlanNode {
 public:
     virtual ~PlanNode() = default;
@@ -45,6 +48,7 @@ private:
     std::vector<ColumnDefinition> output_columns_;
 };
 
+// 顺序读取表中的全部记录。
 class TableScanPlan final : public PlanNode {
 public:
     explicit TableScanPlan(TableMetadata table);
@@ -58,6 +62,7 @@ private:
     TableMetadata table_;
 };
 
+// 根据等值键取得候选 RID；只有真实物理索引可用时优化器才会生成。
 class IndexScanPlan final : public PlanNode {
 public:
     IndexScanPlan(TableMetadata table, std::string index_name, Value key);
@@ -77,6 +82,7 @@ private:
     Value key_;
 };
 
+// 对子节点输出逐行计算单个 WHERE 谓词。
 class FilterPlan final : public PlanNode {
 public:
     FilterPlan(BoundPredicate predicate, std::unique_ptr<PlanNode> child);
@@ -101,6 +107,7 @@ private:
     std::unique_ptr<PlanNode> child_;
 };
 
+// 按字段下标重排或裁剪子节点输出。
 class ProjectPlan final : public PlanNode {
 public:
     ProjectPlan(std::vector<std::uint32_t> column_indices,
@@ -127,6 +134,7 @@ private:
     std::unique_ptr<PlanNode> child_;
 };
 
+// 生成供 EXPLAIN 和测试使用的可读树形计划。
 [[nodiscard]] std::string format_plan(const PlanNode& plan);
 
 } // namespace minidb::query

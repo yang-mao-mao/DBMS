@@ -35,6 +35,7 @@ std::string trim(std::string_view text) {
 }
 
 std::string value_text(const Value& value) {
+    // 将逻辑字段转换为表格单元格文本。
     if (std::holds_alternative<std::monostate>(value)) return "NULL";
     if (const auto* integer = std::get_if<std::int64_t>(&value)) {
         return std::to_string(*integer);
@@ -92,6 +93,7 @@ void print_cells(const std::vector<std::string>& cells,
 }
 
 void print_table(const QueryResult& result, std::ostream& output) {
+    // 先计算每列最大显示宽度，再输出边框、表头和数据行。
     std::vector<std::vector<std::string>> rows;
     rows.reserve(result.rows.size());
     std::vector<std::size_t> widths;
@@ -129,6 +131,7 @@ void print_table(const QueryResult& result, std::ostream& output) {
 
 std::vector<std::string> SqlStatementBuffer::append_line(
     std::string_view line) {
+    // 字符级扫描是为了区分 SQL 结束分号和字符串字面量中的分号。
     std::vector<std::string> statements;
     for (std::size_t i = 0; i < line.size(); ++i) {
         const char character = line[i];
@@ -166,6 +169,7 @@ void SqlStatementBuffer::clear() noexcept {
 
 void Cli::print_result(const QueryResult& result, std::ostream& output,
                        std::ostream& error) {
+    // 查询结果写 stdout，错误写 stderr，便于脚本和测试分别捕获。
     if (!result.ok()) {
         error << "Error: " << result.error_message() << '\n';
         return;
@@ -184,6 +188,7 @@ void Cli::print_help(std::ostream& output) {
 }
 
 int Cli::run() {
+    // 主循环在错误 SQL 后继续运行；只有 .exit/.quit 或输入结束才退出。
     output_ << "Welcome to MiniDB!\n\n";
     SqlStatementBuffer statements;
     std::string line;

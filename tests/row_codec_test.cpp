@@ -1,5 +1,7 @@
 #include "minidb/storage/row_codec.h"
 
+// 验证行格式往返一致，以及字段类型、长度和损坏数据检查。
+
 #include <cassert>
 #include <cstddef>
 #include <cstdint>

@@ -8,6 +8,8 @@
 namespace minidb {
 namespace {
 
+// 行记录布局：魔数、版本、字段数，随后按 Schema 顺序存放字段。
+// 每个字段都有 NULL 标记；VARCHAR 额外带长度前缀。
 constexpr std::uint32_t ROW_MAGIC = 0x31574F52u; // "ROW1" in little endian.
 
 template <typename UInt>
@@ -58,6 +60,7 @@ Result<std::vector<std::byte>> RowCodec::encode(
     }
 
     const std::size_t null_bytes = (schema.columns.size() + 7u) / 8u;
+    // 先写公共头，再逐列依据 Schema 编码，确保逻辑类型不泄漏到底层页接口。
     std::vector<std::byte> output;
     output.reserve(8u + null_bytes + values.size() * 8u);
     append_little_endian(output, ROW_MAGIC);
@@ -117,6 +120,7 @@ Result<std::vector<std::byte>> RowCodec::encode(
 
 Result<Row> RowCodec::decode(const TableSchema& schema,
                              std::span<const std::byte> bytes) {
+    // 所有长度读取前都做边界检查，截断或尾随字节均视为数据损坏。
     std::size_t offset = 0;
     std::uint32_t magic = 0;
     std::uint16_t version = 0;

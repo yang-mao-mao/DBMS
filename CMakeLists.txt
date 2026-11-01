@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# 成员 A 的物理存储层：页结构、磁盘页和文件管理。
 add_library(minidb_storage STATIC
         storage/ci_pan_cun_chu.cpp
         storage/ci_pan_cun_chu.h
@@ -18,6 +19,7 @@ target_include_directories(minidb_storage PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/buffer_pool)
 target_compile_features(minidb_storage PUBLIC cxx_std_20)
 
+# 成员 A 的 B+ 树索引：复用真实 BufferPoolManager 和页面文件。
 add_library(minidb_bplus_index STATIC
         index/BPlusTreePage.cpp
         index/BPlusTree.cpp)
@@ -26,6 +28,7 @@ target_include_directories(minidb_bplus_index PUBLIC
 target_compile_features(minidb_bplus_index PUBLIC cxx_std_20)
 target_link_libraries(minidb_bplus_index PUBLIC minidb_storage)
 
+# 成员 B 的关系存储层：持久化 Catalog、行编解码和表级适配器。
 add_library(minidb_catalog_storage STATIC
         src/catalog/catalog.cpp
         src/storage/row_codec.cpp
@@ -38,6 +41,7 @@ target_link_libraries(minidb_catalog_storage PUBLIC
         minidb_storage
         minidb_bplus_index)
 
+# SQL 前端：手写 Lexer、递归下降 Parser 与头文件中的 AST。
 add_library(minidb_sql STATIC
         src/sql/lexer.cpp
         src/sql/parser.cpp)
@@ -45,6 +49,7 @@ target_include_directories(minidb_sql PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(minidb_sql PUBLIC cxx_std_20)
 
+# 查询处理与数据库门面：计划、优化、Volcano 执行器和统一 execute()。
 add_library(minidb_query_engine STATIC
         src/query/plan.cpp
         src/query/planner.cpp
@@ -59,6 +64,7 @@ target_link_libraries(minidb_query_engine PUBLIC
         minidb_catalog_storage
         minidb_sql)
 
+# CLI 单独做成库，便于集成测试通过字符串流驱动，不依赖真实终端。
 add_library(minidb_cli_lib STATIC
         src/cli/cli.cpp)
 target_include_directories(minidb_cli_lib PUBLIC
@@ -73,6 +79,7 @@ target_link_libraries(minidb PRIVATE minidb_cli_lib)
 add_executable(db_test main.cpp)
 target_link_libraries(db_test PRIVATE minidb_storage)
 
+# 每个测试使用独立临时数据库目录，避免污染仓库内已有数据文件。
 include(CTest)
 if(BUILD_TESTING)
     function(enable_test_assertions target)

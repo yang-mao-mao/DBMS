@@ -10,6 +10,7 @@
 
 namespace minidb::query {
 
+// 将 SELECT AST 绑定到 Catalog 中的真实表和字段，并构造初始逻辑计划。
 class QueryPlanner {
 public:
     explicit QueryPlanner(const Catalog& catalog) : catalog_(catalog) {}
@@ -18,6 +19,7 @@ public:
         const sql::SelectStatement& statement) const;
 
 private:
+    // 非拥有引用；Database 保证 Catalog/Storage 生命周期长于 Planner。
     const Catalog& catalog_;
 };
 

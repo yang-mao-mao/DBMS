@@ -14,6 +14,7 @@
 
 namespace minidb {
 
+// 表扫描游标。每次 next() 拉取一条记录，optional 为空表示扫描结束。
 class RowCursor {
 public:
     virtual ~RowCursor() = default;
@@ -21,6 +22,8 @@ public:
     [[nodiscard]] virtual Result<std::optional<RowRecord>> next() = 0;
 };
 
+// 查询模块依赖的最小表级存储抽象。
+// 它隔离底层文件/页面细节，也便于单元测试替换为内存 Mock。
 class ITableStorage {
 public:
     virtual ~ITableStorage() = default;
@@ -40,6 +43,11 @@ public:
     [[nodiscard]] virtual Result<std::optional<RowRecord>> get_row_by_rid(
         TableId table_id, RID rid) const = 0;
 
+    // 删除指定 RID 的关系记录，并同步维护该表的所有可用索引。
+    [[nodiscard]] virtual Status delete_row(TableId table_id, RID rid) = 0;
+
+    // 索引相关接口是明确的能力边界；后端不支持的键类型或索引形态必须
+    // 返回 Unsupported，不能用全表扫描伪装索引查找。
     [[nodiscard]] virtual Status create_index(
         TableId table_id, std::string_view name,
         std::span<const std::uint32_t> key_columns) = 0;

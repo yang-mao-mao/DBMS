@@ -10,6 +10,7 @@
 namespace minidb::sql {
 namespace {
 
+// 标识符采用简化规则：[A-Za-z_][A-Za-z0-9_]*。
 bool is_identifier_start(char character) {
     const auto value = static_cast<unsigned char>(character);
     return std::isalpha(value) != 0 || character == '_';
@@ -36,10 +37,12 @@ Status lexical_error(const SourcePosition& position, std::string message) {
     return Status::invalid_argument(output.str());
 }
 
+// 识别前转成大写，因此 SQL 关键字大小写不敏感，标识符文本仍保留原样。
 const std::unordered_map<std::string, TokenKind> kKeywords{
     {"CREATE", TokenKind::Create},   {"TABLE", TokenKind::Table},
     {"INSERT", TokenKind::Insert},   {"INTO", TokenKind::Into},
     {"VALUES", TokenKind::Values},   {"SELECT", TokenKind::Select},
+    {"DELETE", TokenKind::Delete},
     {"FROM", TokenKind::From},       {"WHERE", TokenKind::Where},
     {"INDEX", TokenKind::Index},     {"ON", TokenKind::On},
     {"EXPLAIN", TokenKind::Explain}, {"INT", TokenKind::Int},
@@ -60,6 +63,7 @@ const char* token_kind_name(TokenKind kind) noexcept {
         case TokenKind::Into: return "INTO";
         case TokenKind::Values: return "VALUES";
         case TokenKind::Select: return "SELECT";
+        case TokenKind::Delete: return "DELETE";
         case TokenKind::From: return "FROM";
         case TokenKind::Where: return "WHERE";
         case TokenKind::Index: return "INDEX";
@@ -112,6 +116,7 @@ SourcePosition Lexer::position() const noexcept {
 }
 
 Result<std::vector<Token>> Lexer::tokenize() {
+    // 主循环按当前字符分派到标识符、字面量、运算符或标点的扫描逻辑。
     std::vector<Token> tokens;
 
     while (true) {

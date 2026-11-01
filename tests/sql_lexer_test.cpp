@@ -1,5 +1,7 @@
 #include "minidb/sql/lexer.h"
 
+// 覆盖大小写、空白、字符串转义、分号和非法字符位置诊断。
+
 #include <cassert>
 #include <string>
 
@@ -77,6 +79,16 @@ void test_comparison_operators() {
     assert(tokens[6].kind == TokenKind::GreaterEqual);
 }
 
+void test_delete_keyword() {
+    Lexer lexer("dElEtE FrOm students WhErE id = 7;");
+    auto result = lexer.tokenize();
+    assert(result.ok());
+    const auto& tokens = result.value();
+    assert(tokens[0].kind == TokenKind::Delete);
+    assert(tokens[1].kind == TokenKind::From);
+    assert(tokens[3].kind == TokenKind::Where);
+}
+
 } // namespace
 
 int main() {
@@ -85,4 +97,5 @@ int main() {
     test_whitespace_and_source_positions();
     test_lexical_errors_report_positions();
     test_comparison_operators();
+    test_delete_keyword();
 }
