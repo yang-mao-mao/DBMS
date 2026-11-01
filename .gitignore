@@ -1,5 +1,6 @@
 # CMake / CLion 构建产物
 cmake-build-*/
+/build*/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
@@ -16,6 +17,12 @@ Makefile
 *.modmap
 *.ninja_log
 *.ninja_deps
+node_modules/
+
+# Local runtime and generated presentation artifacts
+/.runtime/
+/.pptx-work/
+/demo_database/
 
 # 系统保留名（防止再次出现 NUL.exe 之类）
 NUL
