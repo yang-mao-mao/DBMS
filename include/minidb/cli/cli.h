@@ -11,6 +11,8 @@
 
 namespace minidb::cli {
 
+// 累积多行输入，并只把“字符串之外的分号”视为语句结束符。
+// SQL 单引号以两个连续单引号转义，因此需要在字符级维护字符串状态。
 class SqlStatementBuffer {
 public:
     [[nodiscard]] std::vector<std::string> append_line(std::string_view line);
@@ -23,6 +25,7 @@ private:
     bool inside_string_{false};
 };
 
+// 交互式终端前端。CLI 只负责输入/显示，SQL 语义统一交给 Database::execute。
 class Cli {
 public:
     Cli(Database& database, std::istream& input, std::ostream& output,

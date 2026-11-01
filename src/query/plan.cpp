@@ -6,6 +6,7 @@
 namespace minidb::query {
 namespace {
 
+// EXPLAIN 使用的值格式化；字符串加引号，NULL 显式显示。
 std::string value_text(const Value& value) {
     if (const auto* integer = std::get_if<std::int64_t>(&value)) {
         return std::to_string(*integer);
@@ -28,6 +29,7 @@ const char* comparison_text(sql::ComparisonOperator operation) {
     return "?";
 }
 
+// 先输出当前节点，再递归输出子节点，缩进表达树的父子关系。
 void append_plan(std::ostringstream& output, const PlanNode& plan,
                  std::size_t depth) {
     output << std::string(depth * 2, ' ');
@@ -93,6 +95,7 @@ ProjectPlan::ProjectPlan(std::vector<std::uint32_t> column_indices,
       child_(std::move(child)) {}
 
 std::string format_plan(const PlanNode& plan) {
+    // format_plan 只观察计划，不执行查询。
     std::ostringstream output;
     append_plan(output, plan, 0);
     return output.str();

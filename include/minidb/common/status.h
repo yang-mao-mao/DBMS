@@ -6,6 +6,8 @@
 
 namespace minidb {
 
+// MiniDB 各层统一使用的错误码。调用方应优先判断 Status::ok()，
+// 不依赖错误消息文本进行程序分支。
 enum class ErrorCode {
     Ok = 0,
     InvalidArgument,
@@ -19,6 +21,7 @@ enum class ErrorCode {
     InternalError,
 };
 
+// 表示一次不携带返回值的操作结果；默认构造即成功。
 class Status {
 public:
     Status() = default;

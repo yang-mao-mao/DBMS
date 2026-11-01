@@ -12,6 +12,8 @@
 namespace minidb::sql {
 namespace {
 
+// 内部用异常从深层递归下降函数快速回到统一错误出口；
+// 对外仍转换为 Result<Statement>，异常不会越过 Parser API。
 class ParseFailure final : public std::runtime_error {
 public:
     ParseFailure(const Token& token, std::string message)
@@ -70,6 +72,7 @@ const Token& Parser::consume(TokenKind kind, std::string_view expectation) {
 }
 
 Result<Statement> Parser::parse_statement() {
+    // 顶层仅根据首 Token 分派，具体产生式由 parse_* 函数处理。
     if (tokens_.empty()) {
         return Status::invalid_argument("parser requires an End token");
     }
@@ -88,6 +91,8 @@ Result<Statement> Parser::parse_statement() {
             statement = parse_insert();
         } else if (match(TokenKind::Select)) {
             statement = parse_select();
+        } else if (match(TokenKind::Delete)) {
+            statement = parse_delete();
         } else if (match(TokenKind::Explain)) {
             statement = parse_explain();
         } else {
@@ -193,6 +198,14 @@ SelectStatement Parser::parse_select() {
     return statement;
 }
 
+DeleteStatement Parser::parse_delete() {
+    DeleteStatement statement;
+    consume(TokenKind::From, "FROM");
+    statement.table_name = consume(TokenKind::Identifier, "table name").text;
+    if (match(TokenKind::Where)) statement.where = parse_predicate();
+    return statement;
+}
+
 ExplainStatement Parser::parse_explain() {
     consume(TokenKind::Select, "SELECT after EXPLAIN");
     return {std::make_unique<SelectStatement>(parse_select())};
@@ -227,6 +240,7 @@ Predicate Parser::parse_predicate() {
 }
 
 Result<Statement> parse_sql(std::string_view sql_text) {
+    // SQL 文本 -> Token 序列 -> 类型安全 AST。
     Lexer lexer(sql_text);
     auto tokens = lexer.tokenize();
     if (!tokens.ok()) return tokens.status();

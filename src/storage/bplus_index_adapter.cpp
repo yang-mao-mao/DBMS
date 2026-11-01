@@ -86,6 +86,36 @@ Status BPlusIndexAdapter::insert(std::int64_t key, RID rid) {
     return Status::internal_error("unknown B+ tree insertion result");
 }
 
+Status BPlusIndexAdapter::erase(std::int64_t key, RID expected_rid) {
+    ::RID physical{};
+    switch (impl_->tree->find(key, physical)) {
+        case BPlusTree::FindResult::NOT_FOUND:
+            return Status::corruption("B+ tree index is missing a row key");
+        case BPlusTree::FindResult::PAGE_ERROR:
+            return Status::io_error("B+ tree lookup failed before deletion");
+        case BPlusTree::FindResult::FOUND:
+            break;
+    }
+    if (physical.page_id != expected_rid.page_id
+        || physical.slot_id != expected_rid.slot_id) {
+        return Status::corruption("B+ tree key refers to an unexpected RID");
+    }
+
+    switch (impl_->tree->erase(key)) {
+        case BPlusTree::EraseResult::REMOVED:
+            return Status::ok_status();
+        case BPlusTree::EraseResult::RECLAIM_FAILED:
+            // 键已经从树中提交删除，只是空页回收失败。对关系层而言删除
+            // 已生效，继续执行可避免留下指向已删除记录的索引项。
+            return Status::ok_status();
+        case BPlusTree::EraseResult::NOT_FOUND:
+            return Status::corruption("B+ tree key disappeared during deletion");
+        case BPlusTree::EraseResult::PAGE_ERROR:
+            return Status::io_error("B+ tree failed to delete an index entry");
+    }
+    return Status::internal_error("unknown B+ tree deletion result");
+}
+
 Result<std::vector<RID>> BPlusIndexAdapter::lookup(std::int64_t key) const {
     ::RID physical{};
     switch (impl_->tree->find(key, physical)) {

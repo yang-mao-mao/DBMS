@@ -14,6 +14,8 @@
 
 namespace minidb::execution {
 
+// Volcano/Pull 模型的统一算子协议：open 初始化，next 每次拉取一行，
+// optional 为空表示正常结束，close 释放游标等运行期资源。
 class Operator {
 public:
     virtual ~Operator() = default;
@@ -23,6 +25,7 @@ public:
     [[nodiscard]] virtual Status close() = 0;
 };
 
+// 使用 ITableStorage::scan_rows 顺序拉取整张表。
 class TableScanOperator final : public Operator {
 public:
     TableScanOperator(const ITableStorage& storage, TableId table_id)
@@ -39,6 +42,7 @@ private:
     bool open_{false};
 };
 
+// 先通过真实索引得到 RID 列表，再逐个按 RID 读取完整记录。
 class IndexScanOperator final : public Operator {
 public:
     IndexScanOperator(const ITableStorage& storage, TableId table_id,
@@ -62,6 +66,7 @@ private:
     bool open_{false};
 };
 
+// 不缓存全部结果：不断从子算子拉取，直到找到满足谓词的记录。
 class FilterOperator final : public Operator {
 public:
     FilterOperator(query::BoundPredicate predicate,
@@ -78,6 +83,7 @@ private:
     bool open_{false};
 };
 
+// 对子算子返回的 Row 执行字段投影，并保留原记录 RID。
 class ProjectOperator final : public Operator {
 public:
     ProjectOperator(std::vector<std::uint32_t> column_indices,

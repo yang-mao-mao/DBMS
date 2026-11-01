@@ -1,5 +1,7 @@
 #include "minidb/database/database.h"
 
+// 通过 Database::execute 验证 SQL 到真实存储结果的端到端数据流。
+
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -169,6 +171,70 @@ void test_database_restart() {
     assert(indexed.plan->find("IndexScan") != std::string::npos);
 }
 
+void test_delete_with_scan_index_and_restart() {
+    TemporaryDirectory directory;
+    {
+        auto opened = minidb::Database::open(directory.path());
+        assert(opened.ok());
+        auto database = std::move(opened).value();
+        assert_ok(database->execute(
+            "CREATE TABLE items (id INT, name VARCHAR(16));"));
+        assert_ok(database->execute("INSERT INTO items VALUES (1, 'one');"));
+        assert_ok(database->execute("INSERT INTO items VALUES (2, 'two');"));
+        assert_ok(database->execute("INSERT INTO items VALUES (3, 'three');"));
+        assert_ok(database->execute("CREATE INDEX idx_items_id ON items(id);"));
+
+        auto result = database->execute("DELETE FROM items WHERE id = 2;");
+        assert_ok(result);
+        assert(result.affected_rows == 1);
+        assert(result.message == "1 row deleted.");
+
+        result = database->execute("SELECT * FROM items WHERE id = 2;");
+        assert_ok(result);
+        assert(result.rows.empty());
+        assert(result.plan->find("IndexScan") != std::string::npos);
+
+        // 删除必须同步清除唯一索引项，原键随后可以重新插入。
+        assert_ok(database->execute("INSERT INTO items VALUES (2, 'two-again');"));
+
+        result = database->execute("DELETE FROM items WHERE name = 'three';");
+        assert_ok(result);
+        assert(result.affected_rows == 1);
+
+        result = database->execute("DELETE FROM items WHERE id = 999;");
+        assert_ok(result);
+        assert(result.affected_rows == 0);
+        assert(result.message == "0 rows deleted.");
+
+        result = database->execute("DELETE FROM items WHERE missing = 1;");
+        assert(!result.ok());
+        assert(result.status.code() == minidb::ErrorCode::NotFound);
+        result = database->execute("DELETE FROM items WHERE id = 'wrong';");
+        assert(!result.ok());
+        assert(result.status.code() == minidb::ErrorCode::InvalidArgument);
+    }
+
+    {
+        auto reopened = minidb::Database::open(directory.path());
+        assert(reopened.ok());
+        auto database = std::move(reopened).value();
+        auto result = database->execute("SELECT * FROM items;");
+        assert_ok(result);
+        assert(result.rows.size() == 2);
+
+        result = database->execute("DELETE FROM items;");
+        assert_ok(result);
+        assert(result.affected_rows == 2);
+    }
+
+    auto reopened = minidb::Database::open(directory.path());
+    assert(reopened.ok());
+    auto database = std::move(reopened).value();
+    const auto result = database->execute("SELECT * FROM items;");
+    assert_ok(result);
+    assert(result.rows.empty());
+}
+
 void test_catalog_metadata_cannot_fake_a_physical_index() {
     TemporaryDirectory directory;
     minidb::TableId table_id = 0;
@@ -206,5 +272,6 @@ void test_catalog_metadata_cannot_fake_a_physical_index() {
 int main() {
     test_database_end_to_end();
     test_database_restart();
+    test_delete_with_scan_index_and_restart();
     test_catalog_metadata_cannot_fake_a_physical_index();
 }

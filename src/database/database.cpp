@@ -47,6 +47,7 @@ Result<std::unique_ptr<Database>> Database::open(
 }
 
 QueryResult Database::execute(const std::string& sql_text) {
+    // 统一入口先解析 AST，再按语句 variant 分派；错误均转成 QueryResult。
     auto parsed = sql::parse_sql(sql_text);
     if (!parsed.ok()) return failed(parsed.status());
     const sql::Statement& statement = parsed.value();
@@ -61,6 +62,10 @@ QueryResult Database::execute(const std::string& sql_text) {
     if (const auto* select = std::get_if<sql::SelectStatement>(&statement)) {
         return execute_select(*select, false);
     }
+    if (const auto* delete_statement =
+            std::get_if<sql::DeleteStatement>(&statement)) {
+        return execute_delete(*delete_statement);
+    }
     if (const auto* create_index =
             std::get_if<sql::CreateIndexStatement>(&statement)) {
         return execute_create_index(*create_index);
@@ -74,6 +79,7 @@ QueryResult Database::execute(const std::string& sql_text) {
 
 QueryResult Database::execute_select(
     const sql::SelectStatement& statement, bool explain_only) {
+    // SELECT 完整流水线：Planner -> Optimizer -> EXPLAIN 或 ExecutionEngine。
     query::QueryPlanner planner(storage_->catalog());
     auto planned = planner.plan(statement);
     if (!planned.ok()) return failed(planned.status());
@@ -102,6 +108,7 @@ QueryResult Database::execute_select(
 
 QueryResult Database::execute_create_table(
     const sql::CreateTableStatement& statement) {
+    // DDL 不需要构造查询算子树，直接调用表级适配器。
     auto created = storage_->create_table(statement.schema.name,
                                           statement.schema.columns);
     if (!created.ok()) return failed(created.status());
@@ -122,8 +129,42 @@ QueryResult Database::execute_insert(const sql::InsertStatement& statement) {
     return result;
 }
 
+QueryResult Database::execute_delete(const sql::DeleteStatement& statement) {
+    auto table = storage_->catalog().find_table(statement.table_name);
+    if (!table.ok()) return failed(table.status());
+
+    // DELETE 复用 SELECT 的绑定、优化和 Volcano 执行路径，但投影全部字段
+    // 并保留 RID，随后由 StorageAdapter 完成物理记录和索引项删除。
+    sql::SelectStatement selection{
+        sql::AllColumns{}, statement.table_name, statement.where};
+    query::QueryPlanner planner(storage_->catalog());
+    auto planned = planner.plan(selection);
+    if (!planned.ok()) return failed(planned.status());
+    query::RuleBasedOptimizer optimizer(storage_->catalog(), *storage_);
+    auto optimized = optimizer.optimize(std::move(planned).value());
+    if (!optimized.ok()) return failed(optimized.status());
+
+    execution::ExecutionEngine engine(*storage_);
+    auto records = engine.execute_records(*optimized.value());
+    if (!records.ok()) return failed(records.status());
+
+    std::size_t deleted = 0;
+    for (const auto& record : records.value()) {
+        const Status status = storage_->delete_row(table.value().id, record.rid);
+        if (!status.ok()) return failed(status);
+        ++deleted;
+    }
+
+    QueryResult result;
+    result.affected_rows = deleted;
+    result.message = std::to_string(deleted)
+        + (deleted == 1 ? " row deleted." : " rows deleted.");
+    return result;
+}
+
 QueryResult Database::execute_create_index(
     const sql::CreateIndexStatement& statement) {
+    // 物理适配器只接受当前 B+ 树真实支持的单列唯一 INT64 索引。
     auto table = storage_->catalog().find_table(statement.table_name);
     if (!table.ok()) return failed(table.status());
     auto column = find_column(table.value().schema, statement.column_name);

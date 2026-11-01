@@ -12,6 +12,7 @@
 
 namespace minidb::sql {
 
+// WHERE 单条件支持的比较运算符。
 enum class ComparisonOperator {
     Equal,
     NotEqual,
@@ -21,6 +22,7 @@ enum class ComparisonOperator {
     GreaterEqual,
 };
 
+// Parser 产生的未绑定谓词，字段名将在 Planner 阶段解析成字段下标。
 struct Predicate {
     std::string column;
     ComparisonOperator operation{ComparisonOperator::Equal};
@@ -39,6 +41,7 @@ struct NamedColumns {
     bool operator==(const NamedColumns&) const = default;
 };
 
+// SELECT * 与显式字段列表互斥，用 variant 保证类型安全。
 using Projection = std::variant<AllColumns, NamedColumns>;
 
 struct CreateTableStatement {
@@ -62,6 +65,13 @@ struct SelectStatement {
     bool operator==(const SelectStatement&) const = default;
 };
 
+struct DeleteStatement {
+    std::string table_name;
+    std::optional<Predicate> where;
+
+    bool operator==(const DeleteStatement&) const = default;
+};
+
 struct CreateIndexStatement {
     std::string index_name;
     std::string table_name;
@@ -70,13 +80,16 @@ struct CreateIndexStatement {
     bool operator==(const CreateIndexStatement&) const = default;
 };
 
+// 当前 EXPLAIN 仅允许包裹 SELECT，unique_ptr 表达 AST 的独占所有权。
 struct ExplainStatement {
     std::unique_ptr<SelectStatement> query;
 };
 
+// parse_sql 的统一输出；执行入口再按具体语句类型分派。
 using Statement = std::variant<CreateTableStatement,
                                InsertStatement,
                                SelectStatement,
+                               DeleteStatement,
                                CreateIndexStatement,
                                ExplainStatement>;
 

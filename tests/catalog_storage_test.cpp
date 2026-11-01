@@ -1,5 +1,7 @@
 #include "minidb/storage/real_storage_adapter.h"
 
+// 验证建表、插入、扫描、RID 读取和关闭后 Catalog/数据恢复。
+
 #include <cassert>
 #include <chrono>
 #include <cstdint>

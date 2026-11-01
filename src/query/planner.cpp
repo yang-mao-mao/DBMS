@@ -40,6 +40,7 @@ bool value_matches_type(const Value& value, DataType type) {
 
 Result<std::unique_ptr<PlanNode>> QueryPlanner::plan(
     const sql::SelectStatement& statement) const {
+    // 初始形态固定为 Project([Filter](TableScan))；索引选择留给 Optimizer。
     auto table_result = catalog_.find_table(statement.table_name);
     if (!table_result.ok()) return table_result.status();
     TableMetadata table = std::move(table_result).value();

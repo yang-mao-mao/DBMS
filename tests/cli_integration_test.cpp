@@ -1,6 +1,8 @@
 #include "minidb/cli/cli.h"
 #include "minidb/database/database.h"
 
+// 用字符串流模拟终端，验证多行输入、表格输出、错误恢复和重启持久化。
+
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -72,6 +74,8 @@ void test_multiline_sql_table_output_errors_and_explain() {
         "EXPLAIN SELECT name FROM students WHERE id = 1;\n"
         "SELEC broken;\n"
         "SELECT name FROM students WHERE id = 2;\n"
+        "DELETE FROM students WHERE id = 2;\n"
+        "SELECT name FROM students WHERE id = 2;\n"
         ".quit\n";
 
     const CliOutput result = run_cli(*database, script);
@@ -93,6 +97,8 @@ void test_multiline_sql_table_output_errors_and_explain() {
     assert(result.standard_output.find("Index created.") != std::string::npos);
     assert(result.standard_output.find("IndexScan(table=students")
            != std::string::npos);
+    assert(result.standard_output.find("1 row deleted.") != std::string::npos);
+    assert(result.standard_output.find("0 rows.") != std::string::npos);
     assert(result.standard_output.find("Bye!") != std::string::npos);
 
     assert(result.standard_error.find("unsupported or missing SQL statement")

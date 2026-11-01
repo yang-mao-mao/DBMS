@@ -26,6 +26,7 @@ bool apply_comparison(const T& left, const T& right,
     return false;
 }
 
+// 在执行期再次防御行结构或类型损坏；NULL 在当前 WHERE 语义下不匹配。
 Result<bool> evaluate(const query::BoundPredicate& predicate, const Row& row) {
     if (predicate.column_index >= row.size()) {
         return Status::corruption("filter column is missing from input row");
@@ -58,6 +59,7 @@ Result<bool> evaluate(const query::BoundPredicate& predicate, const Row& row) {
 } // namespace
 
 Status TableScanOperator::open() {
+    // open 获取游标，next 只负责逐条转发，close 释放游标。
     if (open_) return Status::internal_error("TableScan is already open");
     auto cursor = storage_.scan_rows(table_id_);
     if (!cursor.ok()) return cursor.status();
@@ -78,6 +80,7 @@ Status TableScanOperator::close() {
 }
 
 Status IndexScanOperator::open() {
+    // 索引查找只返回候选 RID；完整行仍通过 StorageAdapter 按 RID 读取。
     if (open_) return Status::internal_error("IndexScan is already open");
     auto lookup = storage_.index_lookup(table_id_, index_name_, key_);
     if (!lookup.ok()) return lookup.status();
@@ -116,6 +119,7 @@ Status FilterOperator::open() {
 }
 
 Result<std::optional<RowRecord>> FilterOperator::next() {
+    // Pull 模型：持续向下游拉取，直到命中谓词或子算子耗尽。
     if (!open_) return not_open_status();
     while (true) {
         auto record = child_->next();
@@ -142,6 +146,7 @@ Status ProjectOperator::open() {
 }
 
 Result<std::optional<RowRecord>> ProjectOperator::next() {
+    // 仅复制被选择的 Value，输出顺序与 SELECT 字段列表一致。
     if (!open_) return not_open_status();
     auto input = child_->next();
     if (!input.ok()) return input.status();

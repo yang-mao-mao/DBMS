@@ -9,8 +9,11 @@
 
 namespace minidb {
 
+// 将“一表一文件”的物理存储接口适配成 ITableStorage。
+// 上层只处理 TableId、RID 和 Row，不直接接触 DiskManager 或页布局。
 class RealStorageAdapter final : public ITableStorage {
 public:
+    // 打开 Catalog；具体表文件按需打开，避免长期持有底层文件句柄。
     [[nodiscard]] static Result<std::unique_ptr<RealStorageAdapter>> open(
         const std::filesystem::path& database_directory);
 
@@ -29,6 +32,7 @@ public:
         TableId table_id) const override;
     [[nodiscard]] Result<std::optional<RowRecord>> get_row_by_rid(
         TableId table_id, RID rid) const override;
+    [[nodiscard]] Status delete_row(TableId table_id, RID rid) override;
 
     [[nodiscard]] Status create_index(
         TableId table_id, std::string_view name,

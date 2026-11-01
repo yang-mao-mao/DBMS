@@ -12,6 +12,7 @@ Result<std::unique_ptr<PlanNode>> RuleBasedOptimizer::optimize(
 
 Result<std::unique_ptr<PlanNode>> RuleBasedOptimizer::optimize_node(
     std::unique_ptr<PlanNode> node) const {
+    // 自顶向下识别节点，并先递归优化子树。
     if (node->kind() == PlanNodeKind::Project) {
         auto& project = static_cast<ProjectPlan&>(*node);
         auto child = optimize_node(project.take_child());
@@ -27,6 +28,7 @@ Result<std::unique_ptr<PlanNode>> RuleBasedOptimizer::optimize_node(
     if (!child.ok()) return child.status();
     filter.set_child(std::move(child).value());
 
+    // 当前物理 B+ 树已接入等值查找；范围计划尚未建模，仍保留顺序扫描。
     if (filter.predicate().operation != sql::ComparisonOperator::Equal
         || filter.child().kind() != PlanNodeKind::TableScan) {
         return node;
@@ -39,6 +41,7 @@ Result<std::unique_ptr<PlanNode>> RuleBasedOptimizer::optimize_node(
             || index.key_columns.front() != filter.predicate().column_index) {
             continue;
         }
+        // Catalog 的 Available 只是元数据状态，还要由存储后端确认物理索引可用。
         auto available = storage_.has_index(scan.table().id, index.name);
         if (!available.ok()) return available.status();
         if (!available.value()) continue;

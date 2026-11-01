@@ -1,5 +1,7 @@
 #include "minidb/sql/parser.h"
 
+// 覆盖受支持 SQL 产生式及缺失符号、多余 Token、非法长度等错误。
+
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -91,6 +93,22 @@ void test_create_index() {
     assert(create.column_name == "id");
 }
 
+void test_delete() {
+    auto filtered_statement =
+        parse_success("DELETE FROM students WHERE id = 2;");
+    const auto& filtered = std::get<DeleteStatement>(filtered_statement);
+    assert(filtered.table_name == "students");
+    assert(filtered.where.has_value());
+    assert(filtered.where->column == "id");
+    assert(filtered.where->operation == ComparisonOperator::Equal);
+    assert(std::get<std::int64_t>(filtered.where->value) == 2);
+
+    auto all_statement = parse_success("delete from students;");
+    const auto& all = std::get<DeleteStatement>(all_statement);
+    assert(all.table_name == "students");
+    assert(!all.where.has_value());
+}
+
 void test_explain() {
     auto statement =
         parse_success("EXPLAIN SELECT name FROM students WHERE id = 1;");
@@ -108,7 +126,8 @@ void test_invalid_syntax() {
     expect_parse_failure("CREATE TABLE t ();", "at least one column");
     expect_parse_failure("SELECT FROM students;", "selected column");
     expect_parse_failure("INSERT INTO t VALUES ();", "at least one value");
-    expect_parse_failure("DELETE FROM students;", "unsupported");
+    expect_parse_failure("DELETE students WHERE id = 1;", "expected FROM");
+    expect_parse_failure("DELETE FROM students WHERE;", "WHERE column");
     expect_parse_failure("SELECT * FROM students garbage;", "end of input");
     expect_parse_failure("EXPLAIN INSERT INTO t VALUES (1);",
                          "SELECT after EXPLAIN");
@@ -133,6 +152,7 @@ int main() {
     test_insert_and_escaped_string();
     test_select_forms();
     test_create_index();
+    test_delete();
     test_explain();
     test_invalid_syntax();
     test_invalid_varchar_length();
